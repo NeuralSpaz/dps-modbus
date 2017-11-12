@@ -1,3 +1,5 @@
+//go:generate stringer -type=Mode
+//go:generate stringer -type=Overload
 package main
 
 import (
@@ -11,13 +13,7 @@ import (
 
 func main() {
 	fmt.Println("starting dps5020 monitor in modbus mode")
-	// client := modbus.RTUClient("/dev/ttyUSB0")
-	// // results, err := client.ReadCoils(2, 1)
-	// results, err := client.ReadHoldingRegisters(0, 10)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// fmt.Println(results)
+
 	handler := modbus.NewRTUClientHandler("/dev/ttyUSB0")
 	handler.BaudRate = 9600
 	handler.DataBits = 8
@@ -33,6 +29,9 @@ func main() {
 
 	client := modbus.NewClient(handler)
 	defer handler.Close()
+
+	// ps := new(dps)
+
 	results, err := client.ReadHoldingRegisters(0, 10)
 	// results, err := client.ReadDiscreteInputs(15, 2)
 	if err != nil || results == nil {
@@ -173,8 +172,27 @@ func main() {
 	}
 }
 
-type Control struct {
-	client           modbus.Client
+type DPS struct {
+	conn modbus.Client
+
+	Statuz        Status
+	PreSets       [10]Preset
+	CurrentPreset int
+	debug         bool
+}
+
+type Preset struct {
+	VoltageSet            float64
+	CurrentSet            float64
+	OverVoltageProtection float64
+	OverCurrentProtection float64
+	OverPowerProtection   float64
+	LedBrightness         int
+	DataRecall            int
+	PowerOutput           bool
+}
+
+type Status struct {
 	SetVoltage       float64
 	SetCurrent       float64
 	ActualVoltage    float64
@@ -193,27 +211,62 @@ type Overload uint16
 
 const (
 	OverVoltageProtection Overload = 1
-	OverCurrentProtection          = 2
-	OverPowerProtection            = 3
+	OverCurrentProtection Overload = 2
+	OverPowerProtection   Overload = 3
 )
 
 type Mode uint16
 
 const (
 	ConstantCurrent Mode = 0
-	ConstantVoltage      = 1
+	ConstantVoltage Mode = 1
 )
 
-func (p PowerSupply) GetStatus() error {
-	res, err := p.client.ReadHoldingRegisters(0, 12)
+// func (p PowerSupply) GetStatus() error {
+// 	res, err := p.client.ReadHoldingRegisters(0, 12)
+// 	if err != nil {
+// 		return err
+// 	}
+// }
+
+func (d *DPS) readPresets() error {
+	for i := range d.PreSets {
+		if err := d.readPreset(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *DPS) readPreset(n int) error {
+	presetRaw, err := d.conn.ReadHoldingRegisters(uint16(0x50+(n*0x10)), 8)
 	if err != nil {
 		return err
 	}
+	d.PreSets[n] = parsePresetBytes(presetRaw)
+	if d.debug {
+		log.Printf("M%d presets: %x\n", n, presetRaw)
+		log.Println(d.PreSets[n])
+	}
+
+	return nil
+}
+
+func parsePresetBytes(raw []byte) Preset {
+	var p Preset
+	p.VoltageSet = floatFromBytes(raw[0:2])
+	p.CurrentSet = floatFromBytes(raw[2:4])
+	p.OverVoltageProtection = floatFromBytes(raw[4:6])
+	p.OverCurrentProtection = floatFromBytes(raw[6:8])
+	p.OverPowerProtection = floatFromBytes(raw[8:10])
+	p.LedBrightness = int(binary.BigEndian.Uint16(raw[10:12]))
+	p.DataRecall = int(binary.BigEndian.Uint16(raw[12:14]))
+	if raw[15] > 0 {
+		p.PowerOutput = true
+	}
+	return p
 }
 
 func floatFromBytes(b []byte) float64 {
-	if len(b) != 2 {
-		return -1.0
-	}
 	return float64(binary.BigEndian.Uint16(b)) / 100
 }
