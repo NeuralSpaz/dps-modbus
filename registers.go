@@ -21,9 +21,9 @@ package main
 const (
 	voltageSetRegister    = 0
 	currentSetRegister    = 1
-	voltageOutRegister    = 3
-	powerOutRegister      = 4
-	supplyVoltageRegister = 5
+	voltageOutRegister    = 2
+	powerOutRegister      = 3
+	supplyVoltageRegister = 4
 	lockRegister          = 6
 	protectionRegister    = 7
 	modeRegister          = 8 // Constant Current or Voltage

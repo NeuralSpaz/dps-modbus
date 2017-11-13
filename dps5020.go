@@ -1,11 +1,13 @@
 //go:generate stringer -type=Mode
-//go:generate stringer -type=Overload
+//go:generate stringer -type=Protection
+//go:generate stringer -type=Lock
 package main
 
 import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/goburrow/modbus"
@@ -28,152 +30,32 @@ func main() {
 	defer handler.Close()
 
 	client := modbus.NewClient(handler)
-	defer handler.Close()
 
-	// ps := new(dps)
+	dps := new(DPS)
+	dps.conn = client
 
-	results, err := client.ReadHoldingRegisters(0, 10)
-	// results, err := client.ReadDiscreteInputs(15, 2)
-	if err != nil || results == nil {
-		log.Fatal(err, results)
-	}
-	log.Println(results)
-	// var amps uint16
-	for i := 0; i < len(results); i += 2 {
-		fmt.Printf("%2d: %02x %02x ", i, results[i], results[i+1])
-		// if k == 3 {
-		// 	// fmt.Println("bytes ", results[2:5])
-		// 	amps = binary.BigEndian.Uint16(results[2:4])
-		// 	fmt.Printf("Amps %2.2f\n", float64(amps)/100)
-		// }
-	}
-	fmt.Println("")
-	svolts := binary.BigEndian.Uint16(results[0:2])
-	fmt.Printf("Set volts %2.2f\n", float64(svolts)/100)
-	samps := binary.BigEndian.Uint16(results[2:4])
-	fmt.Printf("Set Amps %2.2f\n", float64(samps)/100)
-	avolts := binary.BigEndian.Uint16(results[4:6])
-	fmt.Printf("Actual volts %2.2f\n", float64(avolts)/100)
-	aamps := binary.BigEndian.Uint16(results[6:8])
-	fmt.Printf("Actual Amps %2.2f\n", float64(aamps)/100)
-	apower := binary.BigEndian.Uint16(results[8:10])
-	fmt.Printf("Actual power %2.2f\n", float64(apower)/100)
-	supplyVolts := binary.BigEndian.Uint16(results[10:12])
-	fmt.Printf("Supply Volts %2.2f\n", float64(supplyVolts)/100)
+	dps.readPresets()
+	dps.readStatus()
 
-	var on bool
-	if results[19] == 01 {
-		on = true
-	}
-	if on {
-		r, err := client.WriteSingleRegister(9, 0)
-		// fmt.Println(r)
-		if err != nil || results == nil {
-			log.Fatal(err, r)
-		}
-	}
-	r, err := client.WriteSingleRegister(0, 0)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
+	dps.RLock()
+	fmt.Printf("%+#v", dps)
+	dps.RUnlock()
 
-	r, err = client.WriteSingleRegister(6, 1)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
-
-	r, err = client.WriteSingleRegister(1, 0)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
-
-	r, err = client.WriteSingleRegister(9, 1)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
-	r, err = client.WriteSingleRegister(1, 2000)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
-
-	for v := 6.00; v < 13.0; v += 0.5 {
-
-		sv := v * 100
-		value := uint16(sv)
-		r, err := client.WriteSingleRegister(0, value)
-		// fmt.Println(r)
-		svolts := binary.BigEndian.Uint16(r)
-		fmt.Println(float64(svolts)/100, " volts")
-		if err != nil || results == nil {
-			log.Fatal(err, r)
-		}
-		r, err = client.ReadHoldingRegisters(3, 1)
-		if err != nil || results == nil {
-			log.Fatal(err, r)
-		}
-		aamps := binary.BigEndian.Uint16(r)
-		fmt.Printf("Actual Amps %2.2f\n", float64(aamps)/100)
-		// time.Sleep(time.Millisecond * 10)
-	}
-	start := time.Now()
+	end := time.Now().Add(time.Second * 10)
 	for {
-		if time.Now().After(start.Add(time.Second * 10)) {
+		if time.Now().After(end) {
 			break
 		}
-		// r, err := client.ReadHoldingRegisters(3, 1)
-		// if err != nil || results == nil {
-		// 	log.Fatal(err, r)
-		// }
-		// aamps := binary.BigEndian.Uint16(r)
-		// fmt.Printf("Actual Amps %2.2f\n", float64(aamps)/100)
-		results, err := client.ReadHoldingRegisters(0, 30)
-		fmt.Println(results)
-		// results, err := client.ReadDiscreteInputs(15, 2)
-		if err != nil || results == nil {
-			log.Fatal(err, results)
-		}
-		for i := 0; i < len(results); i += 2 {
-			fmt.Printf("%2d: %02x %02x ", i, results[i], results[i+1])
-			// if k == 3 {
-			// 	// fmt.Println("bytes ", results[2:5])
-			// 	amps = binary.BigEndian.Uint16(results[2:4])
-			// 	fmt.Printf("Amps %2.2f\n", float64(amps)/100)
-			// }
-		}
-
-		svolts := binary.BigEndian.Uint16(results[0:2])
-		fmt.Printf("\nSet volts %2.2f\n", float64(svolts)/100)
-		samps := binary.BigEndian.Uint16(results[2:4])
-		fmt.Printf("Set Amps %2.2f\n", float64(samps)/100)
-		avolts := binary.BigEndian.Uint16(results[4:6])
-		fmt.Printf("Actual volts %2.2f\n", float64(avolts)/100)
-		aamps := binary.BigEndian.Uint16(results[6:8])
-		fmt.Printf("Actual Amps %2.2f\n", float64(aamps)/100)
-		apower := binary.BigEndian.Uint16(results[8:10])
-		fmt.Printf("Actual power %2.2f\n", float64(apower)/100)
-		supplyVolts := binary.BigEndian.Uint16(results[10:12])
-		fmt.Printf("Supply Volts %2.2f\n", float64(supplyVolts)/100)
-
-	}
-	r, err = client.WriteSingleRegister(9, 0)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
-	}
-	r, err = client.WriteSingleRegister(6, 0)
-	// fmt.Println(r)
-	if err != nil || results == nil {
-		log.Fatal(err, r)
+		dps.readStatus()
+		dps.RLock()
+		fmt.Printf("%+#v", dps.Statuz)
+		dps.RUnlock()
 	}
 }
 
 type DPS struct {
 	conn modbus.Client
+	sync.RWMutex
 
 	Statuz        Status
 	PreSets       [10]Preset
@@ -187,8 +69,8 @@ type Preset struct {
 	OverVoltageProtection float64
 	OverCurrentProtection float64
 	OverPowerProtection   float64
-	LedBrightness         int
-	DataRecall            int
+	LedBrightness         uint16
+	DataRecall            uint16
 	PowerOutput           bool
 }
 
@@ -199,20 +81,35 @@ type Status struct {
 	ActualCurrent    float64
 	Power            float64
 	SupplyVoltage    float64
-	Locked           bool
-	ProtectionTrip   Overload
+	LockOut          Lock
+	ProtectionTrip   Protection
 	Constant         Mode
+	OutputOn         Output
 	DisplayBightness uint16
 	Model            uint16
 	Version          uint16
 }
 
-type Overload uint16
+type Lock uint16
 
 const (
-	OverVoltageProtection Overload = 1
-	OverCurrentProtection Overload = 2
-	OverPowerProtection   Overload = 3
+	Unlocked Lock = 0
+	Locked   Lock = 1
+)
+
+type Output uint16
+
+const (
+	Off Output = 0
+	On  Output = 1
+)
+
+type Protection uint16
+
+const (
+	OverVoltageProtection Protection = 1
+	OverCurrentProtection Protection = 2
+	OverPowerProtection   Protection = 3
 )
 
 type Mode uint16
@@ -222,14 +119,40 @@ const (
 	ConstantVoltage Mode = 1
 )
 
-// func (p PowerSupply) GetStatus() error {
-// 	res, err := p.client.ReadHoldingRegisters(0, 12)
-// 	if err != nil {
-// 		return err
-// 	}
-// }
+func (d *DPS) readStatus() error {
+	d.Lock()
+	defer d.Unlock()
+	statusRaw, err := d.conn.ReadHoldingRegisters(0, 12)
+	if err != nil {
+		return err
+	}
+	d.Statuz = parseStatus(statusRaw)
+	return nil
+}
+
+func parseStatus(raw []byte) Status {
+	var s Status
+
+	s.SetVoltage = floatFromBytes(raw[0:2])
+	s.SetCurrent = floatFromBytes(raw[2:4])
+	s.ActualVoltage = floatFromBytes(raw[4:6])
+	s.ActualCurrent = floatFromBytes(raw[6:8])
+	s.Power = floatFromBytes(raw[8:10])
+	s.SupplyVoltage = floatFromBytes(raw[10:12])
+	s.LockOut = Lock(binary.BigEndian.Uint16(raw[12:14]))
+	s.ProtectionTrip = Protection(binary.BigEndian.Uint16(raw[14:16]))
+	s.Constant = Mode(binary.BigEndian.Uint16(raw[16:18]))
+	s.OutputOn = Output(binary.BigEndian.Uint16(raw[18:20]))
+	s.DisplayBightness = binary.BigEndian.Uint16(raw[20:22])
+	s.Model = binary.BigEndian.Uint16(raw[22:24])
+	s.Version = binary.BigEndian.Uint16(raw[24:26])
+
+	return s
+}
 
 func (d *DPS) readPresets() error {
+	d.Lock()
+	defer d.Unlock()
 	for i := range d.PreSets {
 		if err := d.readPreset(i); err != nil {
 			return err
@@ -259,8 +182,8 @@ func parsePresetBytes(raw []byte) Preset {
 	p.OverVoltageProtection = floatFromBytes(raw[4:6])
 	p.OverCurrentProtection = floatFromBytes(raw[6:8])
 	p.OverPowerProtection = floatFromBytes(raw[8:10])
-	p.LedBrightness = int(binary.BigEndian.Uint16(raw[10:12]))
-	p.DataRecall = int(binary.BigEndian.Uint16(raw[12:14]))
+	p.LedBrightness = binary.BigEndian.Uint16(raw[10:12])
+	p.DataRecall = binary.BigEndian.Uint16(raw[12:14])
 	if raw[15] > 0 {
 		p.PowerOutput = true
 	}
