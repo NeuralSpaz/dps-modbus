@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -34,22 +35,36 @@ func main() {
 	dps := new(DPS)
 	dps.conn = client
 
-	dps.readPresets()
+	// dps.readPresets()
 	dps.readStatus()
 
 	dps.RLock()
-	fmt.Printf("%+#v", dps)
+	// fmt.Printf("%v", dps)
+	// for k, preset := range dps.PreSets {
+	fmt.Printf("PresetM0:\n%s\n", dps.PreSets[0])
+	// 	if k > 2 {
+	// 		break
+	// 	}
+	// }
 	dps.RUnlock()
 
+	if err := dps.enableOutput(); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 	end := time.Now().Add(time.Second * 10)
 	for {
 		if time.Now().After(end) {
 			break
 		}
+
 		dps.readStatus()
 		dps.RLock()
-		fmt.Printf("%+#v", dps.Statuz)
+		fmt.Println(dps.Statuz)
 		dps.RUnlock()
+	}
+	if err := dps.disableOutput(); err != nil {
+		log.Println(err)
 	}
 }
 
@@ -74,6 +89,18 @@ type Preset struct {
 	PowerOutput           bool
 }
 
+func (p Preset) String() string {
+	return fmt.Sprintf("\tSetVoltage: %2.2fV\n\tSetCurrent:%2.2fA\n\tOVP:%2.2fV\n\tOCP:%2.2fA\n\tOPP:%2.2fW\n\tLED Brightness:%v\n\tDataRecall:%v\n\tOutput Enabled On Start:%t\n",
+		p.VoltageSet,
+		p.CurrentSet,
+		p.OverVoltageProtection,
+		p.OverCurrentProtection,
+		p.OverPowerProtection,
+		p.LedBrightness,
+		p.DataRecall,
+		p.PowerOutput)
+}
+
 type Status struct {
 	SetVoltage       float64
 	SetCurrent       float64
@@ -88,6 +115,13 @@ type Status struct {
 	DisplayBightness uint16
 	Model            uint16
 	Version          uint16
+}
+
+func (s Status) String() string {
+	return fmt.Sprintf("SV:%2.2fV\tAV:%2.2f \nSC:%2.2fA\tAC:%2.2fA \nP:%2.2fW",
+		s.SetVoltage, s.ActualVoltage,
+		s.SetCurrent, s.ActualCurrent,
+		s.Power)
 }
 
 type Lock uint16
@@ -127,7 +161,10 @@ func (d *DPS) readStatus() error {
 		return err
 	}
 	d.Statuz = parseStatus(statusRaw)
-	return nil
+
+	err = d.readPreset(0)
+	return err
+
 }
 
 func parseStatus(raw []byte) Status {
@@ -181,7 +218,7 @@ func parsePresetBytes(raw []byte) Preset {
 	p.CurrentSet = floatFromBytes(raw[2:4])
 	p.OverVoltageProtection = floatFromBytes(raw[4:6])
 	p.OverCurrentProtection = floatFromBytes(raw[6:8])
-	p.OverPowerProtection = floatFromBytes(raw[8:10])
+	p.OverPowerProtection = floatFromBytes(raw[8:10]) * 10
 	p.LedBrightness = binary.BigEndian.Uint16(raw[10:12])
 	p.DataRecall = binary.BigEndian.Uint16(raw[12:14])
 	if raw[15] > 0 {
@@ -192,4 +229,22 @@ func parsePresetBytes(raw []byte) Preset {
 
 func floatFromBytes(b []byte) float64 {
 	return float64(binary.BigEndian.Uint16(b)) / 100
+}
+
+func (d *DPS) enableOutput() error {
+	resp, err := d.conn.WriteSingleRegister(9, 1)
+	status := binary.BigEndian.Uint16(resp)
+	if status != 1 {
+		return fmt.Errorf("failed to turn on output")
+	}
+	return err
+}
+
+func (d *DPS) disableOutput() error {
+	resp, err := d.conn.WriteSingleRegister(9, 0)
+	status := binary.BigEndian.Uint16(resp)
+	if status != 0 {
+		return fmt.Errorf("failed to turn off output")
+	}
+	return err
 }
