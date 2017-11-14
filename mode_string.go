@@ -4,7 +4,7 @@ package main
 
 import "fmt"
 
-const _Mode_name = "ConstantCurrentConstantVoltage"
+const _Mode_name = "ConstantVoltageConstantCurrent"
 
 var _Mode_index = [...]uint8{0, 15, 30}
 

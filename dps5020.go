@@ -47,17 +47,30 @@ func main() {
 	// 	}
 	// }
 	dps.RUnlock()
+	targetVoltage := 12.0
+	initalVolage := 1.0
+
+	if err := dps.setVoltage(0.0); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 
 	if err := dps.enableOutput(); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
-	end := time.Now().Add(time.Second * 10)
+	end := time.Now().Add(time.Second * 60)
 	for {
 		if time.Now().After(end) {
 			break
 		}
-
+		if targetVoltage > initalVolage {
+			initalVolage += 1.0
+			if err := dps.setVoltage(initalVolage); err != nil {
+				log.Println(err)
+				os.Exit(1)
+			}
+		}
 		dps.readStatus()
 		dps.RLock()
 		fmt.Println(dps.Statuz)
@@ -118,10 +131,14 @@ type Status struct {
 }
 
 func (s Status) String() string {
-	return fmt.Sprintf("SV:%2.2fV\tAV:%2.2f \nSC:%2.2fA\tAC:%2.2fA \nP:%2.2fW",
-		s.SetVoltage, s.ActualVoltage,
-		s.SetCurrent, s.ActualCurrent,
-		s.Power)
+	if s.ProtectionTrip != 0 {
+		return fmt.Sprint(s.ProtectionTrip)
+	}
+	if s.SupplyVoltage < s.ActualVoltage+2 && s.Constant == ConstantCurrent {
+		fmt.Println("Current limiting due to low supply voltage")
+	}
+	return fmt.Sprintf("V:%6.2fV\tAC:%6.2fA\tP: %6.2fW \t%v",
+		s.ActualVoltage, s.ActualCurrent, s.Power, s.Constant)
 }
 
 type Lock uint16
@@ -149,8 +166,8 @@ const (
 type Mode uint16
 
 const (
-	ConstantCurrent Mode = 0
-	ConstantVoltage Mode = 1
+	ConstantVoltage Mode = 0
+	ConstantCurrent Mode = 1
 )
 
 func (d *DPS) readStatus() error {
@@ -232,19 +249,31 @@ func floatFromBytes(b []byte) float64 {
 }
 
 func (d *DPS) enableOutput() error {
-	resp, err := d.conn.WriteSingleRegister(9, 1)
-	status := binary.BigEndian.Uint16(resp)
-	if status != 1 {
+	resp, err := d.conn.WriteSingleRegister(onOffRegister, 1)
+	status := Output(binary.BigEndian.Uint16(resp))
+	d.Statuz.OutputOn = status
+	if status != On {
 		return fmt.Errorf("failed to turn on output")
 	}
 	return err
 }
 
 func (d *DPS) disableOutput() error {
-	resp, err := d.conn.WriteSingleRegister(9, 0)
-	status := binary.BigEndian.Uint16(resp)
-	if status != 0 {
+	resp, err := d.conn.WriteSingleRegister(onOffRegister, 0)
+	status := Output(binary.BigEndian.Uint16(resp))
+	d.Statuz.OutputOn = status
+	if status != Off {
 		return fmt.Errorf("failed to turn off output")
+	}
+	return err
+}
+
+func (d *DPS) setVoltage(sv float64) error {
+	resp, err := d.conn.WriteSingleRegister(voltageSetRegister, uint16(sv)*100)
+	setVoltage := floatFromBytes(resp)
+	d.Statuz.SetVoltage = setVoltage
+	if err != nil {
+		return fmt.Errorf("failed to set voltage")
 	}
 	return err
 }
