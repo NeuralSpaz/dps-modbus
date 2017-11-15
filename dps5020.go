@@ -47,10 +47,15 @@ func main() {
 	// 	}
 	// }
 	dps.RUnlock()
-	targetVoltage := 12.0
-	initalVolage := 1.0
+	targetVoltage := 2.3
+	initalVolage := 2.1
 
-	if err := dps.setVoltage(0.0); err != nil {
+	if err := dps.setVoltage(initalVolage); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+
+	if err := dps.setCurrent(4.0); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
@@ -59,13 +64,30 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
-	end := time.Now().Add(time.Second * 60)
+	end := time.Now().Add(time.Second * 10)
 	for {
 		if time.Now().After(end) {
 			break
 		}
 		if targetVoltage > initalVolage {
-			initalVolage += 1.0
+			initalVolage += 0.1
+			if err := dps.setVoltage(initalVolage); err != nil {
+				log.Println(err)
+				os.Exit(1)
+			}
+		}
+		dps.readStatus()
+		dps.RLock()
+		fmt.Println(dps.Statuz)
+		dps.RUnlock()
+	}
+	end = time.Now().Add(time.Second * 60)
+	for {
+		if time.Now().After(end) {
+			break
+		}
+		if initalVolage > 0 {
+			initalVolage -= 0.01
 			if err := dps.setVoltage(initalVolage); err != nil {
 				log.Println(err)
 				os.Exit(1)
@@ -269,9 +291,19 @@ func (d *DPS) disableOutput() error {
 }
 
 func (d *DPS) setVoltage(sv float64) error {
-	resp, err := d.conn.WriteSingleRegister(voltageSetRegister, uint16(sv)*100)
+	resp, err := d.conn.WriteSingleRegister(voltageSetRegister, uint16(sv*100))
 	setVoltage := floatFromBytes(resp)
 	d.Statuz.SetVoltage = setVoltage
+	if err != nil {
+		return fmt.Errorf("failed to set voltage")
+	}
+	return err
+}
+
+func (d *DPS) setCurrent(sc float64) error {
+	resp, err := d.conn.WriteSingleRegister(currentSetRegister, uint16(sc*100))
+	scResp := floatFromBytes(resp)
+	d.Statuz.SetCurrent = scResp
 	if err != nil {
 		return fmt.Errorf("failed to set voltage")
 	}
