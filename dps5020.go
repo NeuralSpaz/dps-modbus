@@ -47,10 +47,10 @@ func main() {
 	// 	}
 	// }
 	dps.RUnlock()
-	targetVoltage := 2.3
-	initalVolage := 2.1
+	targetVoltage := 2.0
+	// initalVolage := 2.1
 
-	if err := dps.setVoltage(initalVolage); err != nil {
+	if err := dps.setVoltage(targetVoltage); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
@@ -64,40 +64,40 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
-	end := time.Now().Add(time.Second * 10)
+	end := time.Now().Add(time.Second * 8)
 	for {
 		if time.Now().After(end) {
 			break
 		}
-		if targetVoltage > initalVolage {
-			initalVolage += 0.1
-			if err := dps.setVoltage(initalVolage); err != nil {
-				log.Println(err)
-				os.Exit(1)
-			}
-		}
+		// if targetVoltage > initalVolage {
+		// 	initalVolage += 0.1
+		// 	if err := dps.setVoltage(initalVolage); err != nil {
+		// 		log.Println(err)
+		// 		os.Exit(1)
+		// 	}
+		// }
 		dps.readStatus()
 		dps.RLock()
 		fmt.Println(dps.Statuz)
 		dps.RUnlock()
 	}
-	end = time.Now().Add(time.Second * 60)
-	for {
-		if time.Now().After(end) {
-			break
-		}
-		if initalVolage > 0 {
-			initalVolage -= 0.01
-			if err := dps.setVoltage(initalVolage); err != nil {
-				log.Println(err)
-				os.Exit(1)
-			}
-		}
-		dps.readStatus()
-		dps.RLock()
-		fmt.Println(dps.Statuz)
-		dps.RUnlock()
-	}
+	// end = time.Now().Add(time.Second * 10)
+	// for {
+	// 	if time.Now().After(end) {
+	// 		break
+	// 	}
+	// 	// if initalVolage > 0 {
+	// 	// 	initalVolage -= 0.01
+	// 	// 	if err := dps.setVoltage(initalVolage); err != nil {
+	// 	// 		log.Println(err)
+	// 	// 		os.Exit(1)
+	// 	// 	}
+	// 	// }
+	// 	dps.readStatus()
+	// 	dps.RLock()
+	// 	fmt.Println(dps.Statuz)
+	// 	dps.RUnlock()
+	// }
 	if err := dps.disableOutput(); err != nil {
 		log.Println(err)
 	}
