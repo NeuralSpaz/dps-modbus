@@ -1,6 +1,3 @@
-//go:generate stringer -type=Mode
-//go:generate stringer -type=Protection
-//go:generate stringer -type=Lock
 package main
 
 import (
@@ -8,15 +5,68 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/goburrow/modbus"
+	"github.com/jmoiron/sqlx"
+	"github.com/nats-io/nats"
 )
+
+func dataLogger(dbname string, user string, password string, server string) {
+	go func() {
+		servers := "nats://127.0.0.1:4222"
+		hostname, _ := os.Hostname()
+		name := nats.Name(hostname + "logger")
+		nc, err := nats.Connect(servers, name)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		c, _ := nats.NewEncodedConn(nc, "json")
+		defer c.Close()
+		suber := make(chan Status)
+		c.BindRecvChan("CellStatus", suber)
+		dbConnectString := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true&loc=Local", user, password, server, dbname)
+
+		db, err := sqlx.Open("mysql", dbConnectString)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		if err := db.Ping(); err != nil {
+			log.Fatalln(err)
+		}
+		inserttmpl := fmt.Sprintf("INSERT INTO %s.cell (ts,SetVoltage,SetCurrent,ActualVoltage,ActualCurrent,Power,SupplyVoltage,ProtectionTrip,Constant,OutputOn) VALUES (?,?,?,?,?,?,?,?,?,?)", dbname)
+
+		stmt, err := db.Preparex(inserttmpl)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		for {
+			select {
+			case s := <-suber:
+				fmt.Println("chan: ", s)
+				ts := time.Now()
+
+				_, err := stmt.Exec(ts, s.SetVoltage, s.SetCurrent, s.ActualVoltage, s.ActualCurrent, s.Power, s.SupplyVoltage, s.ProtectionTrip, s.Constant, s.OutputOn)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+		}
+	}()
+
+}
 
 func main() {
 	fmt.Println("starting dps5020 monitor in modbus mode")
-
+	dbuser := os.Getenv("DPSUSER")
+	dbpassword := os.Getenv("DPSPASS")
+	dbname := os.Getenv("DPSDB")
+	dbconn := os.Getenv("DPSDBCONN")
+	dataLogger(dbname, dbuser, dbpassword, dbconn)
 	handler := modbus.NewRTUClientHandler("/dev/ttyUSB0")
 	handler.BaudRate = 9600
 	handler.DataBits = 8
@@ -24,31 +74,34 @@ func main() {
 	handler.StopBits = 1
 	handler.SlaveId = 1
 	// handler.Logger = log.New(os.Stdout, "rtu: ", log.LstdFlags)
-	err := handler.Connect()
-	if err != nil {
+	if err := handler.Connect(); err != nil {
 		log.Fatal(err)
 	}
 	defer handler.Close()
 
 	client := modbus.NewClient(handler)
 
+	servers := "nats://127.0.0.1:4222"
+	hostname, _ := os.Hostname()
+	name := nats.Name(hostname)
+	nc, err := nats.Connect(servers, name)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	c, _ := nats.NewEncodedConn(nc, "json")
+	defer c.Close()
+	puber := make(chan Status, 10)
+	c.BindSendChan("CellStatus", puber)
+
 	dps := new(DPS)
 	dps.conn = client
+	dps.puber = puber
 
-	// dps.readPresets()
+	dps.readPresets()
+
 	dps.readStatus()
-
-	dps.RLock()
-	// fmt.Printf("%v", dps)
-	// for k, preset := range dps.PreSets {
-	fmt.Printf("PresetM0:\n%s\n", dps.PreSets[0])
-	// 	if k > 2 {
-	// 		break
-	// 	}
-	// }
-	dps.RUnlock()
+	// time.Sleep(time.Second * 1)
 	targetVoltage := 2.0
-	// initalVolage := 2.1
 
 	if err := dps.setVoltage(targetVoltage); err != nil {
 		log.Println(err)
@@ -64,133 +117,23 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
-	end := time.Now().Add(time.Second * 8)
+
+	end := time.Now().Add(time.Second * 60)
+
 	for {
 		if time.Now().After(end) {
 			break
 		}
-		// if targetVoltage > initalVolage {
-		// 	initalVolage += 0.1
-		// 	if err := dps.setVoltage(initalVolage); err != nil {
-		// 		log.Println(err)
-		// 		os.Exit(1)
-		// 	}
-		// }
 		dps.readStatus()
 		dps.RLock()
 		fmt.Println(dps.Statuz)
 		dps.RUnlock()
 	}
-	// end = time.Now().Add(time.Second * 10)
-	// for {
-	// 	if time.Now().After(end) {
-	// 		break
-	// 	}
-	// 	// if initalVolage > 0 {
-	// 	// 	initalVolage -= 0.01
-	// 	// 	if err := dps.setVoltage(initalVolage); err != nil {
-	// 	// 		log.Println(err)
-	// 	// 		os.Exit(1)
-	// 	// 	}
-	// 	// }
-	// 	dps.readStatus()
-	// 	dps.RLock()
-	// 	fmt.Println(dps.Statuz)
-	// 	dps.RUnlock()
-	// }
+
 	if err := dps.disableOutput(); err != nil {
 		log.Println(err)
 	}
 }
-
-type DPS struct {
-	conn modbus.Client
-	sync.RWMutex
-
-	Statuz        Status
-	PreSets       [10]Preset
-	CurrentPreset int
-	debug         bool
-}
-
-type Preset struct {
-	VoltageSet            float64
-	CurrentSet            float64
-	OverVoltageProtection float64
-	OverCurrentProtection float64
-	OverPowerProtection   float64
-	LedBrightness         uint16
-	DataRecall            uint16
-	PowerOutput           bool
-}
-
-func (p Preset) String() string {
-	return fmt.Sprintf("\tSetVoltage: %2.2fV\n\tSetCurrent:%2.2fA\n\tOVP:%2.2fV\n\tOCP:%2.2fA\n\tOPP:%2.2fW\n\tLED Brightness:%v\n\tDataRecall:%v\n\tOutput Enabled On Start:%t\n",
-		p.VoltageSet,
-		p.CurrentSet,
-		p.OverVoltageProtection,
-		p.OverCurrentProtection,
-		p.OverPowerProtection,
-		p.LedBrightness,
-		p.DataRecall,
-		p.PowerOutput)
-}
-
-type Status struct {
-	SetVoltage       float64
-	SetCurrent       float64
-	ActualVoltage    float64
-	ActualCurrent    float64
-	Power            float64
-	SupplyVoltage    float64
-	LockOut          Lock
-	ProtectionTrip   Protection
-	Constant         Mode
-	OutputOn         Output
-	DisplayBightness uint16
-	Model            uint16
-	Version          uint16
-}
-
-func (s Status) String() string {
-	if s.ProtectionTrip != 0 {
-		return fmt.Sprint(s.ProtectionTrip)
-	}
-	if s.SupplyVoltage < s.ActualVoltage+2 && s.Constant == ConstantCurrent {
-		fmt.Println("Current limiting due to low supply voltage")
-	}
-	return fmt.Sprintf("V:%6.2fV\tAC:%6.2fA\tP: %6.2fW \t%v",
-		s.ActualVoltage, s.ActualCurrent, s.Power, s.Constant)
-}
-
-type Lock uint16
-
-const (
-	Unlocked Lock = 0
-	Locked   Lock = 1
-)
-
-type Output uint16
-
-const (
-	Off Output = 0
-	On  Output = 1
-)
-
-type Protection uint16
-
-const (
-	OverVoltageProtection Protection = 1
-	OverCurrentProtection Protection = 2
-	OverPowerProtection   Protection = 3
-)
-
-type Mode uint16
-
-const (
-	ConstantVoltage Mode = 0
-	ConstantCurrent Mode = 1
-)
 
 func (d *DPS) readStatus() error {
 	d.Lock()
@@ -200,6 +143,7 @@ func (d *DPS) readStatus() error {
 		return err
 	}
 	d.Statuz = parseStatus(statusRaw)
+	go func() { d.puber <- d.Statuz }()
 
 	err = d.readPreset(0)
 	return err

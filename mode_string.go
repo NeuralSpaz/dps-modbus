@@ -4,9 +4,9 @@ package main
 
 import "fmt"
 
-const _Mode_name = "ConstantVoltageConstantCurrent"
+const _Mode_name = "CVCC"
 
-var _Mode_index = [...]uint8{0, 15, 30}
+var _Mode_index = [...]uint8{0, 2, 4}
 
 func (i Mode) String() string {
 	if i >= Mode(len(_Mode_index)-1) {

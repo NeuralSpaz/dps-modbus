@@ -4,14 +4,13 @@ package main
 
 import "fmt"
 
-const _Protection_name = "OverVoltageProtectionOverCurrentProtectionOverPowerProtection"
+const _Protection_name = "NoneOverVoltageProtectionOverCurrentProtectionOverPowerProtection"
 
-var _Protection_index = [...]uint8{0, 21, 42, 61}
+var _Protection_index = [...]uint8{0, 4, 25, 46, 65}
 
 func (i Protection) String() string {
-	i -= 1
 	if i >= Protection(len(_Protection_index)-1) {
-		return fmt.Sprintf("Protection(%d)", i+1)
+		return fmt.Sprintf("Protection(%d)", i)
 	}
 	return _Protection_name[_Protection_index[i]:_Protection_index[i+1]]
 }
