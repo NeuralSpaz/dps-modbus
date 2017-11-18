@@ -26,7 +26,7 @@ func dataLogger(dbname string, user string, password string, server string) {
 		defer c.Close()
 		suber := make(chan Status)
 		c.BindRecvChan("CellStatus", suber)
-		dbConnectString := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true&loc=Local", user, password, server, dbname)
+		dbConnectString := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true&loc=UTC", user, password, server, dbname)
 
 		db, err := sqlx.Open("mysql", dbConnectString)
 		if err != nil {
@@ -36,7 +36,7 @@ func dataLogger(dbname string, user string, password string, server string) {
 		if err := db.Ping(); err != nil {
 			log.Fatalln(err)
 		}
-		inserttmpl := fmt.Sprintf("INSERT INTO %s.cell (ts,SetVoltage,SetCurrent,ActualVoltage,ActualCurrent,Power,SupplyVoltage,ProtectionTrip,Constant,OutputOn) VALUES (?,?,?,?,?,?,?,?,?,?)", dbname)
+		inserttmpl := fmt.Sprintf("INSERT INTO %s.cell (utc,unix,SetVoltage,SetCurrent,ActualVoltage,ActualCurrent,Power,SupplyVoltage,ProtectionTrip,Constant,OutputOn) VALUES (?,?,?,?,?,?,?,?,?,?,?)", dbname)
 
 		stmt, err := db.Preparex(inserttmpl)
 		if err != nil {
@@ -47,10 +47,8 @@ func dataLogger(dbname string, user string, password string, server string) {
 		for {
 			select {
 			case s := <-suber:
-				fmt.Println("chan: ", s)
 				ts := time.Now()
-
-				_, err := stmt.Exec(ts, s.SetVoltage, s.SetCurrent, s.ActualVoltage, s.ActualCurrent, s.Power, s.SupplyVoltage, s.ProtectionTrip, s.Constant, s.OutputOn)
+				_, err := stmt.Exec(ts.UTC(), ts.Unix(), s.SetVoltage, s.SetCurrent, s.ActualVoltage, s.ActualCurrent, s.Power, s.SupplyVoltage, s.ProtectionTrip, s.Constant, s.OutputOn)
 				if err != nil {
 					log.Println(err)
 				}
@@ -118,7 +116,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	end := time.Now().Add(time.Second * 60)
+	end := time.Now().Add(time.Second * 360)
 
 	for {
 		if time.Now().After(end) {
